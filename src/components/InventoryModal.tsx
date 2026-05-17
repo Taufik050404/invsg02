@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Package, Hash, Save, AlertCircle, Camera, Image as ImageIcon, RefreshCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { InventoryItem } from '../types';
+import CameraCapture from './CameraCapture';
 
 interface InventoryModalProps {
   isOpen: boolean;
@@ -22,9 +23,6 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (editItem) {
@@ -49,87 +47,6 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
       }
     };
   }, [editItem, isOpen, imagePreview]);
-
-  // Clean up stream on transition or close
-  useEffect(() => {
-    if (!isOpen || !isCameraActive) {
-      stopCamera();
-    }
-  }, [isOpen, isCameraActive]);
-
-  const startCamera = async () => {
-    setError(null);
-    // Explicitly check for mediaDevices support
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setError('Kamera tidak didukung di browser ini. Silakan gunakan galeri.');
-      setShowSourceChoice(false);
-      // Fallback: Open gallery automatically after a small delay
-      setTimeout(() => fileInputRef.current?.click(), 1000);
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }, 
-        audio: false 
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setIsCameraActive(true);
-      setShowSourceChoice(false);
-    } catch (err: any) {
-      console.error('Camera Error:', err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setError('Akses kamera ditolak. Silakan berikan izin di pengaturan browser.');
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setError('Kamera tidak ditemukan pada perangkat ini.');
-      } else {
-        setError('Gagal mengakses kamera. Silakan gunakan unggah galeri sebagai alternatif.');
-      }
-      setShowSourceChoice(false);
-      // Fallback
-      setTimeout(() => fileInputRef.current?.click(), 2000);
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setIsCameraActive(false);
-  };
-
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          if (blob) {
-            // Clean up old preview if it was a blob
-            if (imagePreview && imagePreview.startsWith('blob:')) {
-              URL.revokeObjectURL(imagePreview);
-            }
-            const url = URL.createObjectURL(blob);
-            setImagePreview(url);
-            setImageFile(blob);
-            stopCamera();
-          }
-        }, 'image/jpeg', 0.9);
-      }
-    }
-  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -167,6 +84,16 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     }
   };
 
+  const handleCameraCapture = (blob: Blob, previewUrl: string) => {
+    // Clean up old preview if it was a blob
+    if (imagePreview && imagePreview.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreview);
+    }
+    setImagePreview(previewUrl);
+    setImageFile(blob);
+    setIsCameraActive(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || quantity < 0 || !imagePreview) {
@@ -197,6 +124,80 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     }
   };
 
+  return (
+    <AnimatePresence>
+      <InventoryModalContent 
+        isOpen={isOpen} 
+        onClose={onClose} 
+        onSave={onSave} 
+        editItem={editItem}
+        isCameraActive={isCameraActive}
+        setIsCameraActive={setIsCameraActive}
+        handleCameraCapture={handleCameraCapture}
+        name={name}
+        setName={setName}
+        quantity={quantity}
+        setQuantity={setQuantity}
+        imagePreview={imagePreview}
+        setImagePreview={setImagePreview}
+        setImageFile={setImageFile}
+        isLoading={isLoading}
+        error={error}
+        setError={setError}
+        showSourceChoice={showSourceChoice}
+        setShowSourceChoice={setShowSourceChoice}
+        fileInputRef={fileInputRef}
+        cameraInputRef={cameraInputRef}
+        handleSubmit={handleSubmit}
+        handleImageChange={handleImageChange}
+      />
+      
+      <AnimatePresence>
+        {isCameraActive && (
+          <CameraCapture 
+            onCapture={handleCameraCapture} 
+            onClose={() => setIsCameraActive(false)} 
+          />
+        )}
+      </AnimatePresence>
+    </AnimatePresence>
+  );
+}
+
+interface ModalContentProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (data: any) => Promise<void>;
+  editItem?: InventoryItem | null;
+  isCameraActive: boolean;
+  setIsCameraActive: (v: boolean) => void;
+  handleCameraCapture: (b: Blob, p: string) => void;
+  name: string;
+  setName: (v: string) => void;
+  quantity: number;
+  setQuantity: (v: number) => void;
+  imagePreview: string | null;
+  setImagePreview: (v: string | null) => void;
+  setImageFile: (v: File | Blob | null) => void;
+  isLoading: boolean;
+  error: string | null;
+  setError: (v: string | null) => void;
+  showSourceChoice: boolean;
+  setShowSourceChoice: (v: boolean) => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  cameraInputRef: React.RefObject<HTMLInputElement | null>;
+  handleSubmit: (e: React.FormEvent) => void;
+  handleImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}
+
+function InventoryModalContent({ 
+  isOpen, onClose, editItem, 
+  isCameraActive, setIsCameraActive,
+  name, setName, quantity, setQuantity,
+  imagePreview, setShowSourceChoice, showSourceChoice,
+  fileInputRef, cameraInputRef, error, isLoading,
+  handleSubmit, handleImageChange
+}: ModalContentProps) {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -240,106 +241,79 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
                 <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">Gambar Barang</label>
                 
                 <div id="image-container" className="relative">
-                  {isCameraActive ? (
-                    <div className="relative h-64 w-full bg-black rounded-2xl overflow-hidden shadow-inner">
-                      <video 
-                        ref={videoRef} 
-                        autoPlay 
-                        playsInline 
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-3">
-                        <button
-                          type="button"
-                          onClick={capturePhoto}
-                          className="bg-white text-black p-4 rounded-full shadow-lg active:scale-95 transition-transform"
-                        >
-                          <Camera className="w-6 h-6" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={stopCamera}
-                          className="bg-red-500 text-white p-4 rounded-full shadow-lg active:scale-95 transition-transform"
-                        >
-                          <X className="w-6 h-6" />
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div 
-                      id="image-display-zone"
-                      className="relative h-64 w-full border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-3 overflow-hidden group"
-                    >
-                      {imagePreview ? (
-                        <>
-                          <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-4 transition-opacity">
+                  <div 
+                    id="image-display-zone"
+                    className="relative h-64 w-full border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-3 overflow-hidden group"
+                  >
+                    {imagePreview ? (
+                      <>
+                        <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-4 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => setShowSourceChoice(true)}
+                            className="bg-white text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:scale-105 transition-transform"
+                          >
+                            <RefreshCcw className="w-4 h-4" />
+                            Ganti
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center gap-4">
+                        {!showSourceChoice ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowSourceChoice(true)}
+                            className="flex flex-col items-center gap-3 text-gray-400 hover:text-black transition-colors w-full h-full justify-center"
+                          >
+                            <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center group-hover:bg-gray-100 transition-colors">
+                              <Upload className="w-8 h-8" />
+                            </div>
+                            <div className="text-center px-4">
+                              <p className="text-sm font-bold text-gray-900">Ketuk untuk Upload Gambar</p>
+                              <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Kamera atau Galeri</p>
+                            </div>
+                          </button>
+                        ) : (
+                          <div className="flex items-center justify-center gap-2 md:gap-4 animate-in fade-in zoom-in duration-200">
                             <button
                               type="button"
-                              onClick={() => setShowSourceChoice(true)}
-                              className="bg-white text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:scale-105 transition-transform"
+                              onClick={() => { setIsCameraActive(true); setShowSourceChoice(false); }}
+                              className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all active:scale-95 group/btn"
                             >
-                              <RefreshCcw className="w-4 h-4" />
-                              Ganti
+                              <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center text-white mb-1 group-hover/btn:scale-110 transition-transform">
+                                <Camera className="w-6 h-6" />
+                              </div>
+                              <span className="text-[10px] font-bold uppercase tracking-widest">Kamera</span>
+                            </button>
+                            <div className="w-[1px] h-12 bg-gray-100" />
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all active:scale-95 group/btn"
+                            >
+                              <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 mb-1 group-hover/btn:scale-110 transition-transform">
+                                <ImageIcon className="w-6 h-6" />
+                              </div>
+                              <span className="text-[10px] font-bold uppercase tracking-widest">Galeri</span>
+                            </button>
+                            <div className="w-[1px] h-12 bg-gray-100" />
+                            <button
+                              type="button"
+                              onClick={() => setShowSourceChoice(false)}
+                              className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-red-50 border border-transparent hover:border-red-100 transition-all active:scale-95 text-red-500 group/btn"
+                            >
+                              <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center text-red-600 mb-1 group-hover/btn:scale-110 transition-transform">
+                                <X className="w-6 h-6" />
+                              </div>
+                              <span className="text-[10px] font-bold uppercase tracking-widest">Batal</span>
                             </button>
                           </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center gap-4">
-                          {!showSourceChoice ? (
-                            <button
-                              type="button"
-                              onClick={() => setShowSourceChoice(true)}
-                              className="flex flex-col items-center gap-3 text-gray-400 hover:text-black transition-colors w-full h-full justify-center"
-                            >
-                              <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center group-hover:bg-gray-100 transition-colors">
-                                <Upload className="w-8 h-8" />
-                              </div>
-                              <div className="text-center px-4">
-                                <p className="text-sm font-bold text-gray-900">Ketuk untuk Upload Gambar</p>
-                                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Kamera atau Galeri</p>
-                              </div>
-                            </button>
-                          ) : (
-                            <div className="flex items-center justify-center gap-2 md:gap-4 animate-in fade-in zoom-in duration-200">
-                              <button
-                                type="button"
-                                onClick={startCamera}
-                                className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all active:scale-95 group/btn"
-                              >
-                                <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center text-white mb-1 group-hover/btn:scale-110 transition-transform">
-                                  <Camera className="w-6 h-6" />
-                                </div>
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Kamera</span>
-                              </button>
-                              <div className="w-[1px] h-12 bg-gray-100" />
-                              <button
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all active:scale-95 group/btn"
-                              >
-                                <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 mb-1 group-hover/btn:scale-110 transition-transform">
-                                  <ImageIcon className="w-6 h-6" />
-                                </div>
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Galeri</span>
-                              </button>
-                              <div className="w-[1px] h-12 bg-gray-100" />
-                              <button
-                                type="button"
-                                onClick={() => setShowSourceChoice(false)}
-                                className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-red-50 border border-transparent hover:border-red-100 transition-all active:scale-95 text-red-500 group/btn"
-                              >
-                                <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center text-red-600 mb-1 group-hover/btn:scale-110 transition-transform">
-                                  <X className="w-6 h-6" />
-                                </div>
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Batal</span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <input 
                   id="image-input"
@@ -358,7 +332,6 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
                   accept="image/*" 
                   capture="environment"
                 />
-                <canvas ref={canvasRef} className="hidden" />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
