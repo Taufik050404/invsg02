@@ -1,0 +1,11 @@
+{
+  "name": "INVSG02",
+  "description": "Sistem Inventaris dan Pendataan Barang",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

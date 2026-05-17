@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "Item": {
+      "title": "INVSG02 Item",
+      "description": "Represents an item in the INVSG02 inventory.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name of the item."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "The quantity of the item in stock."
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Base64 encoded image or URL of the item image."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the item was added."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the item was last updated."
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of the admin who created the record."
+        }
+      },
+      "required": ["name", "quantity", "imageUrl", "createdAt", "updatedAt", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/items/{itemId}": {
+      "schema": "Item",
+      "description": "Collection of INVSG02 items."
+    }
+  }
+}
