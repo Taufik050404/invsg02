@@ -72,6 +72,7 @@ export default function App() {
   const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const itemsPerPage = 6;
 
@@ -86,6 +87,29 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  const handleExport = async (type: 'pdf' | 'excel' | 'word') => {
+    if (items.length === 0) {
+      toast.error('Tidak ada data untuk diekspor');
+      return;
+    }
+    
+    setIsExporting(true);
+    const toastId = toast.loading(`Menyiapkan file ${type.toUpperCase()}...`);
+    
+    try {
+      if (type === 'pdf') await exportToPDF(items);
+      else if (type === 'excel') await exportToExcel(items);
+      else if (type === 'word') await exportToWord(items);
+      
+      toast.success(`File ${type.toUpperCase()} berhasil diunduh`, { id: toastId });
+    } catch (error) {
+      console.error('Export Error:', error);
+      toast.error(`Gagal mengekspor ke ${type.toUpperCase()}`, { id: toastId });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   useEffect(() => {
     if (!user) {
@@ -256,15 +280,33 @@ export default function App() {
                 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <div className="dropdown relative group">
-                    <button className="w-full sm:w-auto bg-white border border-gray-200 h-[52px] px-6 rounded-2xl flex items-center justify-center gap-2 font-bold hover:bg-gray-50 transition-all shadow-sm active:scale-95">
-                      <Download className="w-5 h-5 text-gray-400" />
+                    <button 
+                      disabled={isExporting}
+                      className="w-full sm:w-auto bg-white border border-gray-200 h-[52px] px-6 rounded-2xl flex items-center justify-center gap-2 font-bold hover:bg-gray-50 transition-all shadow-sm active:scale-95 disabled:bg-gray-50 disabled:text-gray-400"
+                    >
+                      {isExporting ? (
+                        <div className="w-5 h-5 border-2 border-gray-200 border-t-black rounded-full animate-spin" />
+                      ) : (
+                        <Download className="w-5 h-5 text-gray-400" />
+                      )}
                       <span>Ekspor Data</span>
                     </button>
-                    <div className="absolute right-0 top-full mt-2 w-full sm:w-48 bg-white border border-gray-100 rounded-2xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20 flex flex-col overflow-hidden">
-                      <button onClick={() => exportToPDF(items)} className="px-5 py-4 text-left text-sm font-bold hover:bg-gray-50 transition-colors border-b border-gray-50">📄 Download PDF</button>
-                      <button onClick={() => exportToExcel(items)} className="px-5 py-4 text-left text-sm font-bold hover:bg-gray-50 transition-colors border-b border-gray-50">📊 Download Excel</button>
-                      <button onClick={() => exportToWord(items)} className="px-5 py-4 text-left text-sm font-bold hover:bg-gray-50 transition-colors">📝 Download Word</button>
-                    </div>
+                    {!isExporting && (
+                      <div className="absolute right-0 top-full mt-2 w-full sm:w-48 bg-white border border-gray-100 rounded-2xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20 flex flex-col overflow-hidden">
+                        <button onClick={() => handleExport('pdf')} className="px-5 py-4 text-left text-sm font-bold hover:bg-gray-50 transition-colors border-b border-gray-50 flex items-center gap-3">
+                          <span className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center text-red-500 text-xs">PDF</span>
+                          Download PDF
+                        </button>
+                        <button onClick={() => handleExport('excel')} className="px-5 py-4 text-left text-sm font-bold hover:bg-gray-50 transition-colors border-b border-gray-50 flex items-center gap-3">
+                          <span className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center text-emerald-500 text-xs">XLS</span>
+                          Download Excel
+                        </button>
+                        <button onClick={() => handleExport('word')} className="px-5 py-4 text-left text-sm font-bold hover:bg-gray-50 transition-colors flex items-center gap-3">
+                          <span className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-500 text-xs">DOC</span>
+                          Download Word
+                        </button>
+                      </div>
+                    )}
                   </div>
                   
                   <button

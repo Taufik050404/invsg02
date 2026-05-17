@@ -42,13 +42,13 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     setShowSourceChoice(false);
     setError(null);
 
-    // Cleanup previous object URLs if they were created from Blobs
+    // Clean up previous object URLs if they were created from Blobs
     return () => {
       if (imagePreview && imagePreview.startsWith('blob:')) {
         URL.revokeObjectURL(imagePreview);
       }
     };
-  }, [editItem, isOpen]);
+  }, [editItem, isOpen, imagePreview]);
 
   // Clean up stream on transition or close
   useEffect(() => {
@@ -179,6 +179,16 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     try {
       // Pass the file object too if it exists
       await (onSave as any)({ name, quantity, imageUrl: imagePreview, imageFile });
+      
+      // Reset local state after success
+      setName('');
+      setQuantity(0);
+      if (imagePreview && imagePreview.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreview);
+      }
+      setImagePreview(null);
+      setImageFile(null);
+      
       onClose();
     } catch (err: any) {
       setError(err.message || 'Gagal menyimpan data.');
