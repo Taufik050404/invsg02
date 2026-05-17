@@ -14,12 +14,14 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState<number>(0);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | Blob | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [showSourceChoice, setShowSourceChoice] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -33,6 +35,7 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
       setName('');
       setQuantity(0);
       setImagePreview(null);
+      setImageFile(null);
     }
     setIsCameraActive(false);
     setShowSourceChoice(false);
@@ -81,9 +84,17 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
-        setImagePreview(dataUrl);
-        stopCamera();
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              setImagePreview(reader.result as string);
+              setImageFile(blob);
+              stopCamera();
+            };
+            reader.readAsDataURL(blob);
+          }
+        }, 'image/jpeg', 0.8);
       }
     }
   };
@@ -91,13 +102,23 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        setError('Ukuran gambar maksimal 2MB');
+      // Validate format
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        setError('Format gambar tidak didukung. Gunakan JPG, PNG, atau WEBP.');
         return;
       }
+
+      // Validate size (5MB as requested)
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Ukuran gambar maksimal 5MB');
+        return;
+      }
+
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result as string);
+        setImageFile(file);
         setShowSourceChoice(false);
       };
       reader.readAsDataURL(file);
@@ -114,7 +135,8 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     setIsLoading(true);
     setError(null);
     try {
-      await onSave({ name, quantity, imageUrl: imagePreview });
+      // Pass the file object too if it exists
+      await (onSave as any)({ name, quantity, imageUrl: imagePreview, imageFile });
       onClose();
     } catch (err: any) {
       setError(err.message || 'Gagal menyimpan data.');
@@ -216,34 +238,49 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
                             <button
                               type="button"
                               onClick={() => setShowSourceChoice(true)}
-                              className="flex flex-col items-center gap-3 text-gray-400 hover:text-black transition-colors"
+                              className="flex flex-col items-center gap-3 text-gray-400 hover:text-black transition-colors w-full h-full justify-center"
                             >
                               <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center group-hover:bg-gray-100 transition-colors">
                                 <Upload className="w-8 h-8" />
                               </div>
-                              <div className="text-center">
-                                <p className="text-sm font-bold text-gray-900">Pilih Gambar Barang</p>
-                                <p className="text-xs text-gray-500">Kamera atau Galeri</p>
+                              <div className="text-center px-4">
+                                <p className="text-sm font-bold text-gray-900">Ketuk untuk Upload Gambar</p>
+                                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Kamera atau Galeri</p>
                               </div>
                             </button>
                           ) : (
-                            <div className="flex items-center gap-4 animate-in fade-in zoom-in duration-200">
+                            <div className="flex items-center justify-center gap-2 md:gap-4 animate-in fade-in zoom-in duration-200">
                               <button
                                 type="button"
                                 onClick={startCamera}
-                                className="flex flex-col items-center gap-2 p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all"
+                                className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all active:scale-95 group/btn"
                               >
-                                <Camera className="w-8 h-8 text-black" />
-                                <span className="text-xs font-bold uppercase tracking-widest">Kamera</span>
+                                <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center text-white mb-1 group-hover/btn:scale-110 transition-transform">
+                                  <Camera className="w-6 h-6" />
+                                </div>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Kamera</span>
                               </button>
                               <div className="w-[1px] h-12 bg-gray-100" />
                               <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
-                                className="flex flex-col items-center gap-2 p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all"
+                                className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all active:scale-95 group/btn"
                               >
-                                <ImageIcon className="w-8 h-8 text-black" />
-                                <span className="text-xs font-bold uppercase tracking-widest">File</span>
+                                <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 mb-1 group-hover/btn:scale-110 transition-transform">
+                                  <ImageIcon className="w-6 h-6" />
+                                </div>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Galeri</span>
+                              </button>
+                              <div className="w-[1px] h-12 bg-gray-100" />
+                              <button
+                                type="button"
+                                onClick={() => setShowSourceChoice(false)}
+                                className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-2xl hover:bg-red-50 border border-transparent hover:border-red-100 transition-all active:scale-95 text-red-500 group/btn"
+                              >
+                                <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center text-red-600 mb-1 group-hover/btn:scale-110 transition-transform">
+                                  <X className="w-6 h-6" />
+                                </div>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Batal</span>
                               </button>
                             </div>
                           )}
@@ -259,6 +296,15 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
                   onChange={handleImageChange} 
                   className="hidden" 
                   accept="image/*" 
+                />
+                <input 
+                  id="camera-input"
+                  type="file" 
+                  ref={cameraInputRef} 
+                  onChange={handleImageChange} 
+                  className="hidden" 
+                  accept="image/*" 
+                  capture="environment"
                 />
                 <canvas ref={canvasRef} className="hidden" />
               </div>

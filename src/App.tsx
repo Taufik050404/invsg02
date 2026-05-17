@@ -16,6 +16,11 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { 
+  ref, 
+  uploadBytes, 
+  getDownloadURL 
+} from 'firebase/storage';
+import { 
   onAuthStateChanged, 
   signOut, 
   User,
@@ -26,7 +31,7 @@ import { Toaster, toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
 import { format as formatDate } from 'date-fns';
 
-import { db, auth } from './lib/firebase';
+import { db, auth, storage } from './lib/firebase';
 import { InventoryItem, OperationType } from './types';
 import { exportToPDF, exportToWord, exportToExcel } from './lib/exportUtils';
 import Sidebar from './components/Sidebar';
@@ -131,20 +136,38 @@ export default function App() {
     }
   };
 
-  const saveItem = async (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => {
+  const saveItem = async (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { imageFile?: File | Blob }) => {
     if (!user) return;
 
     try {
+      let imageUrl = data.imageUrl;
+
+      // If there's a new file to upload
+      if (data.imageFile) {
+        const fileExtension = data.imageFile.type.split('/')[1] || 'jpg';
+        const fileName = `items/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
+        const storageRef = ref(storage, fileName);
+        
+        const uploadResult = await uploadBytes(storageRef, data.imageFile);
+        imageUrl = await getDownloadURL(uploadResult.ref);
+      }
+
+      const itemData = {
+        name: data.name,
+        quantity: data.quantity,
+        imageUrl,
+      };
+
       if (editingItem) {
         const itemDoc = doc(db, 'items', editingItem.id);
         await updateDoc(itemDoc, {
-          ...data,
+          ...itemData,
           updatedAt: Date.now(),
         });
         toast.success('Data barang berhasil diperbarui');
       } else {
         await addDoc(collection(db, 'items'), {
-          ...data,
+          ...itemData,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           createdBy: user.uid,
