@@ -35,22 +35,19 @@ export async function exportToPDF(items: InventoryItem[]) {
   const doc = new jsPDF();
   const dateStr = format(new Date(), 'yyyy-MM-dd HH:mm');
 
-  doc.setFontSize(20);
-  doc.text('Laporan Inventaris Barang', 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(100);
-  doc.text(`Dicetak pada: ${dateStr}`, 14, 30);
+  doc.setFontSize(22);
+  doc.setTextColor(0);
+  doc.text('INVSG02', 14, 20);
+  doc.setFontSize(16);
+  doc.text('Laporan Inventaris Barang', 14, 30);
+  doc.setFontSize(10);
+  doc.setTextColor(150);
+  doc.text(`Dicetak pada: ${dateStr}`, 14, 38);
 
   const tableData = await Promise.all(items.map(async (item, index) => {
-    let imgData = '';
-    try {
-      imgData = await getBase64ImageFromUrl(item.imageUrl);
-    } catch (e) {
-      console.error('Failed to load image for PDF', e);
-    }
     return [
       (index + 1).toString(),
-      imgData, // We'll handle drawing images in didParseCell or similar if needed, or row height
+      '', // Placeholder for image
       item.name,
       item.quantity.toString(),
       format(item.updatedAt, 'dd MMM yyyy')
@@ -58,21 +55,18 @@ export async function exportToPDF(items: InventoryItem[]) {
   }));
 
   autoTable(doc, {
-    startY: 40,
+    startY: 45,
     head: [['No', 'Gambar', 'Nama Barang', 'Jumlah', 'Terakhir Update']],
-    body: tableData.map(row => [row[0], '', row[2], row[3], row[4]]),
+    body: tableData,
     didDrawCell: (data) => {
       if (data.section === 'body' && data.column.index === 1) {
         const item = items[data.row.index];
         if (item.imageUrl) {
           try {
-            // jspdf-autotable handles positioning, we just need to draw the image
             const x = data.cell.x + 2;
             const y = data.cell.y + 2;
-            const w = 15;
-            const h = 15;
-            // Note: In a real app we'd pre-load all images for better performance
-            // For now we'll assume they are cached or already loaded
+            const w = 16;
+            const h = 16;
             doc.addImage(item.imageUrl, 'JPEG', x, y, w, h);
           } catch (e) {
             console.error('Error adding image to PDF cell', e);
@@ -139,7 +133,16 @@ export async function exportToWord(items: InventoryItem[]) {
       {
         children: [
           new Paragraph({
-            children: [new TextRun({ text: "LAPORAN INVENTARIS BARANG", bold: true, size: 32 })],
+            children: [new TextRun({ text: "INVSG02", bold: true, size: 48, color: "000000" })],
+            alignment: AlignmentType.CENTER,
+          }),
+          new Paragraph({
+            children: [new TextRun({ text: "LAPORAN INVENTARIS BARANG", bold: true, size: 32, color: "666666" })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 },
+          }),
+          new Paragraph({
+            children: [new TextRun({ text: `Dicetak pada: ${format(new Date(), 'dd MMMM yyyy HH:mm')}`, size: 20, color: "999999" })],
             alignment: AlignmentType.CENTER,
             spacing: { after: 400 },
           }),
@@ -163,17 +166,38 @@ export async function exportToExcel(items: InventoryItem[]) {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Inventaris');
 
+  // Add header
+  worksheet.mergeCells('A1:E1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'INVSG02 - LAPORAN INVENTARIS BARANG';
+  titleCell.font = { name: 'Arial', size: 16, bold: true };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  worksheet.mergeCells('A2:E2');
+  const dateCell = worksheet.getCell('A2');
+  dateCell.value = `Dicetak pada: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`;
+  dateCell.font = { name: 'Arial', size: 10, italic: true };
+  dateCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  worksheet.getRow(4).values = ['No', 'Gambar', 'Nama Barang', 'Jumlah', 'Terakhir Update'];
   worksheet.columns = [
-    { header: 'No', key: 'no', width: 5 },
-    { header: 'Gambar', key: 'image', width: 15 },
-    { header: 'Nama Barang', key: 'name', width: 40 },
-    { header: 'Jumlah', key: 'quantity', width: 10 },
-    { header: 'Terakhir Update', key: 'updatedAt', width: 20 },
+    { key: 'no', width: 5 },
+    { key: 'image', width: 18 },
+    { key: 'name', width: 35 },
+    { key: 'quantity', width: 12 },
+    { key: 'updatedAt', width: 22 },
   ];
+
+  // Formatting header row
+  worksheet.getRow(4).eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F2F2F2' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const rowIndex = i + 2;
+    const rowIndex = i + 5;
     worksheet.addRow({
       no: i + 1,
       name: item.name,
@@ -181,19 +205,24 @@ export async function exportToExcel(items: InventoryItem[]) {
       updatedAt: format(item.updatedAt, 'dd/MM/yyyy HH:mm'),
     });
 
-    try {
-      const buffer = await getImageArrayBuffer(item.imageUrl);
-      const imageId = workbook.addImage({
-        buffer: buffer,
-        extension: 'jpeg', // Or dynamic detection
-      });
+    const row = worksheet.getRow(rowIndex);
+    row.height = 60;
+    row.alignment = { vertical: 'middle' };
 
-      worksheet.addImage(imageId, {
-        tl: { col: 1, row: i + 1 },
-        ext: { width: 50, height: 50 },
-        editAs: 'oneCell'
-      });
-      worksheet.getRow(rowIndex).height = 45;
+    try {
+      if (item.imageUrl) {
+        const buffer = await getImageArrayBuffer(item.imageUrl);
+        const imageId = workbook.addImage({
+          buffer: buffer,
+          extension: 'jpeg',
+        });
+
+        worksheet.addImage(imageId, {
+          tl: { col: 1, row: rowIndex - 1 },
+          ext: { width: 60, height: 60 },
+          editAs: 'oneCell'
+        });
+      }
     } catch (e) {
       console.error('Failed to add image to Excel', e);
     }

@@ -31,6 +31,7 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
       setName(editItem.name);
       setQuantity(editItem.quantity);
       setImagePreview(editItem.imageUrl);
+      setImageFile(null);
     } else {
       setName('');
       setQuantity(0);
@@ -39,20 +40,41 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     }
     setIsCameraActive(false);
     setShowSourceChoice(false);
+    setError(null);
+
+    // Cleanup previous object URLs if they were created from Blobs
+    return () => {
+      if (imagePreview && imagePreview.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreview);
+      }
+    };
   }, [editItem, isOpen]);
 
-  // Clean up stream on close
+  // Clean up stream on transition or close
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || !isCameraActive) {
       stopCamera();
     }
-  }, [isOpen]);
+  }, [isOpen, isCameraActive]);
 
   const startCamera = async () => {
     setError(null);
+    // Explicitly check for mediaDevices support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError('Kamera tidak didukung di browser ini. Silakan gunakan galeri.');
+      setShowSourceChoice(false);
+      // Fallback: Open gallery automatically after a small delay
+      setTimeout(() => fileInputRef.current?.click(), 1000);
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' }, 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }, 
         audio: false 
       });
       streamRef.current = stream;
@@ -61,9 +83,18 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
       }
       setIsCameraActive(true);
       setShowSourceChoice(false);
-    } catch (err) {
-      setError('Gagal mengakses kamera. Pastikan izin kamera telah diberikan.');
-      console.error(err);
+    } catch (err: any) {
+      console.error('Camera Error:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setError('Akses kamera ditolak. Silakan berikan izin di pengaturan browser.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setError('Kamera tidak ditemukan pada perangkat ini.');
+      } else {
+        setError('Gagal mengakses kamera. Silakan gunakan unggah galeri sebagai alternatif.');
+      }
+      setShowSourceChoice(false);
+      // Fallback
+      setTimeout(() => fileInputRef.current?.click(), 2000);
     }
   };
 
@@ -86,15 +117,16 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         canvas.toBlob((blob) => {
           if (blob) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              setImagePreview(reader.result as string);
-              setImageFile(blob);
-              stopCamera();
-            };
-            reader.readAsDataURL(blob);
+            // Clean up old preview if it was a blob
+            if (imagePreview && imagePreview.startsWith('blob:')) {
+              URL.revokeObjectURL(imagePreview);
+            }
+            const url = URL.createObjectURL(blob);
+            setImagePreview(url);
+            setImageFile(blob);
+            stopCamera();
           }
-        }, 'image/jpeg', 0.8);
+        }, 'image/jpeg', 0.9);
       }
     }
   };
@@ -106,22 +138,32 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
       const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
       if (!allowedTypes.includes(file.type)) {
         setError('Format gambar tidak didukung. Gunakan JPG, PNG, atau WEBP.');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (cameraInputRef.current) cameraInputRef.current.value = '';
         return;
       }
 
       // Validate size (5MB as requested)
       if (file.size > 5 * 1024 * 1024) {
-        setError('Ukuran gambar maksimal 5MB');
+        setError('Ukuran gambar maksimal 5MB. Silakan kompres gambar Anda.');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (cameraInputRef.current) cameraInputRef.current.value = '';
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-        setImageFile(file);
-        setShowSourceChoice(false);
-      };
-      reader.readAsDataURL(file);
+      // Clean up old preview if it was a blob
+      if (imagePreview && imagePreview.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreview);
+      }
+      
+      const url = URL.createObjectURL(file);
+      setImagePreview(url);
+      setImageFile(file);
+      setShowSourceChoice(false);
+      
+      // Reset input value to allow selecting the same file again if needed
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
     }
   };
 

@@ -144,8 +144,12 @@ export default function App() {
 
       // If there's a new file to upload
       if (data.imageFile) {
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 10);
         const fileExtension = data.imageFile.type.split('/')[1] || 'jpg';
-        const fileName = `items/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
+        // Unique path structure: inventory/[year]/[unique-filename]
+        const year = new Date().getFullYear();
+        const fileName = `inventory/${year}/${timestamp}-${randomString}.${fileExtension}`;
         const storageRef = ref(storage, fileName);
         
         const uploadResult = await uploadBytes(storageRef, data.imageFile);
@@ -164,7 +168,7 @@ export default function App() {
           ...itemData,
           updatedAt: Date.now(),
         });
-        toast.success('Data barang berhasil diperbarui');
+        toast.success(`${data.name} berhasil diperbarui`);
       } else {
         await addDoc(collection(db, 'items'), {
           ...itemData,
@@ -172,9 +176,11 @@ export default function App() {
           updatedAt: Date.now(),
           createdBy: user.uid,
         });
-        toast.success('Barang baru berhasil ditambahkan');
+        toast.success(`${data.name} berhasil ditambahkan`);
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Save Error:', error);
+      toast.error(`Koneksi bermasalah atau upload gagal: ${error.message || ''}`);
       handleFirestoreError(error, editingItem ? OperationType.UPDATE : OperationType.CREATE, 'items');
       throw error;
     }
