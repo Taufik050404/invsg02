@@ -46,7 +46,23 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
         URL.revokeObjectURL(imagePreview);
       }
     };
-  }, [editItem, isOpen, imagePreview]);
+  }, [editItem, isOpen]);
+
+  // Handle cleanup when imagePreview changes
+  useEffect(() => {
+    return () => {
+      // Logic handled in the main effect or specifically here if needed
+    };
+  }, [imagePreview]);
+
+  const handleClose = () => {
+    if (imagePreview && imagePreview.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreview);
+    }
+    setImagePreview(null);
+    setImageFile(null);
+    onClose();
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -128,7 +144,7 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     <AnimatePresence>
       <InventoryModalContent 
         isOpen={isOpen} 
-        onClose={onClose} 
+        onClose={handleClose} 
         onSave={onSave} 
         editItem={editItem}
         isCameraActive={isCameraActive}

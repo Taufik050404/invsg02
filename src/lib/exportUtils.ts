@@ -89,6 +89,14 @@ export async function exportToPDF(items: InventoryItem[]) {
     format(item.updatedAt, 'dd/MM/yyyy HH:mm')
   ]);
 
+  // Pre-fetch images to prevent async issues during rendering
+  const images = await Promise.all(
+    items.map(async (item) => {
+      if (!item.imageUrl) return null;
+      return await getBase64ImageFromUrl(item.imageUrl);
+    })
+  );
+
   autoTable(doc, {
     startY: 48,
     head: [['No', 'Gambar', 'Nama Barang', 'Jumlah', 'Update Terakhir']],
@@ -97,13 +105,13 @@ export async function exportToPDF(items: InventoryItem[]) {
     alternateRowStyles: { fillColor: [250, 250, 250] },
     didDrawCell: (data) => {
       if (data.section === 'body' && data.column.index === 1) {
-        const item = items[data.row.index];
-        if (item.imageUrl) {
+        const base64 = images[data.row.index];
+        if (base64) {
           try {
             const x = data.cell.x + 3;
             const y = data.cell.y + 3;
             const size = 14;
-            doc.addImage(item.imageUrl, 'JPEG', x, y, size, size);
+            doc.addImage(base64, 'JPEG', x, y, size, size);
           } catch (e) {
             console.error('Error drawing image in PDF:', e);
           }
@@ -120,7 +128,8 @@ export async function exportToPDF(items: InventoryItem[]) {
     }
   });
 
-  doc.save(`INVSG02_Inventaris_${filenameDate}.pdf`);
+  const blob = doc.output('blob');
+  saveAs(blob, `INVSG02_Inventaris_${filenameDate}.pdf`);
 }
 
 function interactionDate() {

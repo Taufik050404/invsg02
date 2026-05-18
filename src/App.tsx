@@ -169,20 +169,49 @@ export default function App() {
       // If there's a new file to upload
       if (data.imageFile) {
         const timestamp = Date.now();
-        const randomString = Math.random().toString(36).substring(2, 10);
+        const randomString = Math.random().toString(36).substring(2, 8);
         const fileExtension = data.imageFile.type.split('/')[1] || 'jpg';
-        // Unique path structure: inventory/[year]/[unique-filename]
-        const year = new Date().getFullYear();
-        const fileName = `inventory/${year}/${timestamp}-${randomString}.${fileExtension}`;
+        // Clean item name for filename
+        const safeName = data.name.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 20);
+        const fileName = `inventory/${new Date().getFullYear()}/${timestamp}_${safeName}_${randomString}.${fileExtension}`;
+        
         const storageRef = ref(storage, fileName);
         
-        const uploadResult = await uploadBytes(storageRef, data.imageFile);
-        imageUrl = await getDownloadURL(uploadResult.ref);
+        // Metadata to help with browser caching and identification
+        const metadata = {
+          contentType: data.imageFile.type,
+          customMetadata: {
+            originalName: data.name,
+            uploadedBy: user.uid
+          }
+        };
+
+        // Retry logic for upload
+        let uploadResult;
+        let retries = 3;
+        while (retries > 0) {
+          try {
+            uploadResult = await uploadBytes(storageRef, data.imageFile, metadata);
+            break;
+          } catch (uploadError) {
+            retries--;
+            if (retries === 0) throw uploadError;
+            await new Promise(resolve => setTimeout(resolve, 1000)); // wait 1s
+          }
+        }
+        
+        if (uploadResult) {
+          imageUrl = await getDownloadURL(uploadResult.ref);
+        }
+        
+        if (!imageUrl) {
+          throw new Error('Gagal mendapatkan URL gambar setelah upload.');
+        }
       }
 
       const itemData = {
-        name: data.name,
-        quantity: data.quantity,
+        name: data.name.trim(),
+        quantity: Math.max(0, data.quantity),
         imageUrl,
       };
 
@@ -204,8 +233,11 @@ export default function App() {
       }
     } catch (error: any) {
       console.error('Save Error:', error);
-      toast.error(`Koneksi bermasalah atau upload gagal: ${error.message || ''}`);
-      handleFirestoreError(error, editingItem ? OperationType.UPDATE : OperationType.CREATE, 'items');
+      const errorMessage = error.code === 'storage/unauthorized' 
+        ? 'Error: Akses ditolak. Pastikan Anda sudah login.' 
+        : `Gagal menyimpan: ${error.message || 'Unknown error'}`;
+      
+      toast.error(errorMessage);
       throw error;
     }
   };
