@@ -57,13 +57,29 @@ async function getImageArrayBuffer(imageUrl: string): Promise<ArrayBuffer | null
   }
 }
 
+function formatSafeDate(timestamp: any, formatStr: string) {
+  if (!timestamp) return '-';
+  
+  // Handle Firestore Timestamp
+  if (timestamp && typeof timestamp.toDate === 'function') {
+    return format(timestamp.toDate(), formatStr);
+  }
+  
+  // Handle Number/String
+  try {
+    return format(new Date(timestamp), formatStr);
+  } catch (e) {
+    return '-';
+  }
+}
+
 /**
  * Export to PDF
  */
 export async function exportToPDF(items: InventoryItem[]) {
   const doc = new jsPDF();
-  const dateStr = format(interactionDate(), 'dd MMMM yyyy HH:mm');
-  const filenameDate = format(new Date(), 'yyyyMMdd_HHmm');
+  const dateStr = formatSafeDate(interactionDate(), 'dd MMMM yyyy HH:mm');
+  const filenameDate = formatSafeDate(new Date(), 'yyyyMMdd_HHmm');
 
   // Header Branding
   doc.setFontSize(24);
@@ -86,7 +102,7 @@ export async function exportToPDF(items: InventoryItem[]) {
     '', // Placeholder for image
     item.name,
     item.quantity.toString(),
-    format(item.updatedAt, 'dd/MM/yyyy HH:mm')
+    formatSafeDate(item.updatedAt, 'dd/MM/yyyy HH:mm')
   ]);
 
   // Pre-fetch images to prevent async issues during rendering
@@ -140,8 +156,8 @@ function interactionDate() {
  * Export to Word
  */
 export async function exportToWord(items: InventoryItem[]) {
-  const dateStr = format(new Date(), 'dd MMMM yyyy HH:mm');
-  const filenameDate = format(new Date(), 'yyyyMMdd_HHmm');
+  const dateStr = formatSafeDate(new Date(), 'dd MMMM yyyy HH:mm');
+  const filenameDate = formatSafeDate(new Date(), 'yyyyMMdd_HHmm');
 
   const tableRows = [
     new TableRow({
@@ -187,7 +203,7 @@ export async function exportToWord(items: InventoryItem[]) {
           }),
           new TableCell({ children: [new Paragraph({ text: item.name })], verticalAlign: 'center' }),
           new TableCell({ children: [new Paragraph({ text: item.quantity.toString(), alignment: AlignmentType.CENTER })], verticalAlign: 'center' }),
-          new TableCell({ children: [new Paragraph({ text: format(item.updatedAt, 'dd/MM/yyyy HH:mm'), alignment: AlignmentType.CENTER })], verticalAlign: 'center' }),
+          new TableCell({ children: [new Paragraph({ text: formatSafeDate(item.updatedAt, 'dd/MM/yyyy HH:mm'), alignment: AlignmentType.CENTER })], verticalAlign: 'center' }),
         ],
       })
     );
@@ -229,7 +245,7 @@ export async function exportToWord(items: InventoryItem[]) {
  * Export to Excel
  */
 export async function exportToExcel(items: InventoryItem[]) {
-  const filenameDate = format(new Date(), 'yyyyMMdd_HHmm');
+  const filenameDate = formatSafeDate(new Date(), 'yyyyMMdd_HHmm');
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Inventaris');
 
@@ -243,7 +259,7 @@ export async function exportToExcel(items: InventoryItem[]) {
 
   worksheet.mergeCells('A2:E2');
   const dateCell = worksheet.getCell('A2');
-  dateCell.value = `Tanggal Cetak: ${format(new Date(), 'dd MMMM yyyy HH:mm')}`;
+  dateCell.value = `Tanggal Cetak: ${formatSafeDate(new Date(), 'dd MMMM yyyy HH:mm')}`;
   dateCell.font = { name: 'Arial', size: 11, color: { argb: '666666' } };
   dateCell.alignment = { vertical: 'middle', horizontal: 'center' };
   worksheet.getRow(2).height = 25;
@@ -277,7 +293,7 @@ export async function exportToExcel(items: InventoryItem[]) {
       no: i + 1,
       name: item.name,
       quantity: item.quantity,
-      updatedAt: format(item.updatedAt, 'dd/MM/yyyy HH:mm'),
+      updatedAt: formatSafeDate(item.updatedAt, 'dd/MM/yyyy HH:mm'),
     });
 
     row.height = 70;

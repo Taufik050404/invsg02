@@ -203,26 +203,22 @@ export default function App() {
         }
       }
 
-      const now = Date.now();
+      const now = serverTimestamp();
       const itemData = {
         name: data.name.trim(),
         quantity: Math.max(0, data.quantity),
         imageUrl: imageUrl || '',
+        updatedAt: now
       };
 
       if (editingItem) {
         const itemDoc = doc(db, 'items', editingItem.id);
-        const updateData = {
-          ...itemData,
-          updatedAt: now,
-        };
-        await updateDoc(itemDoc, updateData);
+        await updateDoc(itemDoc, itemData);
         toast.success(`${data.name} berhasil diperbarui`);
       } else {
         const newItem = {
           ...itemData,
           createdAt: now,
-          updatedAt: now,
           createdBy: user.uid,
         };
         await addDoc(collection(db, 'items'), newItem);
@@ -541,7 +537,19 @@ export default function App() {
   );
 }
 
-function format(timestamp: number, formatStr: string) {
-  return formatDate(new Date(timestamp), formatStr);
+function format(timestamp: any, formatStr: string) {
+  if (!timestamp) return '-';
+  
+  // Handle Firestore Timestamp
+  if (timestamp && typeof timestamp.toDate === 'function') {
+    return formatDate(timestamp.toDate(), formatStr);
+  }
+  
+  // Handle Number/String
+  try {
+    return formatDate(new Date(timestamp), formatStr);
+  } catch (e) {
+    return '-';
+  }
 }
 

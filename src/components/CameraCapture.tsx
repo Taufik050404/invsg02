@@ -85,9 +85,13 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
             const url = URL.createObjectURL(blob);
             setCapturedBlob(blob);
             setCapturedPreview(url);
-            stopCamera();
+            // Stop stream to save memory after capture
+            if (stream) {
+              stream.getTracks().forEach(track => track.stop());
+              setStream(null);
+            }
           }
-        }, 'image/jpeg', 0.95);
+        }, 'image/jpeg', 0.85);
       }
     }
   };

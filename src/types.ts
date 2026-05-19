@@ -9,8 +9,8 @@ export interface InventoryItem {
   name: string;
   quantity: number;
   imageUrl: string;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: any;
+  updatedAt: any;
   createdBy: string;
 }
 
