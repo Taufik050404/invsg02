@@ -8,7 +8,7 @@ import CameraCapture from './CameraCapture';
 interface InventoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => Promise<void>;
+  onSave: (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { imageFile?: File | Blob | null }) => Promise<void>;
   editItem?: InventoryItem | null;
 }
 

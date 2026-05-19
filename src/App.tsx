@@ -148,7 +148,12 @@ export default function App() {
   };
 
   const saveItem = async (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { imageFile?: File | Blob }) => {
-    if (!user) return;
+    if (!user) {
+      toast.error('Gagal menyimpan: Session tidak ditemukan. Silakan login kembali.');
+      return;
+    }
+
+    const toastId = toast.loading(editingItem ? 'Memperbarui barang...' : 'Menyimpan barang...');
 
     try {
       let imageUrl = data.imageUrl;
@@ -156,57 +161,30 @@ export default function App() {
       // If there's a new file to upload
       if (data.imageFile) {
         const timestamp = Date.now();
-        const randomString = Math.random().toString(36).substring(2, 8);
-        const fileExtension = data.imageFile.type.split('/')[1] || 'jpg';
-        // Clean item name for filename
-        const safeName = data.name.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 20);
-        const fileName = `inventory/${new Date().getFullYear()}/${timestamp}_${safeName}_${randomString}.${fileExtension}`;
+        const fileExtension = data.imageFile.type?.split('/')[1] || 'jpg';
+        const safeName = data.name.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 15);
+        const fileName = `inventory/${timestamp}_${safeName}.${fileExtension}`;
         
         const storageRef = ref(storage, fileName);
         
-        // Metadata to help with browser caching and identification
+        // Metadata
         const metadata = {
-          contentType: data.imageFile.type,
-          customMetadata: {
-            originalName: data.name,
-            uploadedBy: user.uid
-          }
+          contentType: data.imageFile.type || 'image/jpeg'
         };
 
-        // Retry logic for upload with timeout
-        let uploadResult;
-        let retries = 3;
-        while (retries > 0) {
-          try {
-            // Promise with timeout for upload
-            const uploadPromise = uploadBytes(storageRef, data.imageFile, metadata);
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Upload timeout: Koneksi terlalu lambat')), 20000)
-            );
-            
-            uploadResult = await Promise.race([uploadPromise, timeoutPromise]) as any;
-            break;
-          } catch (uploadError: any) {
-            console.warn(`Upload attempt failed. Retries left: ${retries - 1}`, uploadError);
-            retries--;
-            if (retries === 0) throw uploadError;
-            await new Promise(resolve => setTimeout(resolve, 1500)); // wait 1.5s
-          }
-        }
-        
-        if (uploadResult) {
-          imageUrl = await getDownloadURL(uploadResult.ref);
-        }
+        // Simple upload without complex race timeout for better compatibility
+        const uploadResult = await uploadBytes(storageRef, data.imageFile, metadata);
+        imageUrl = await getDownloadURL(uploadResult.ref);
         
         if (!imageUrl) {
-          throw new Error('Gagal mendapatkan URL gambar setelah upload.');
+          throw new Error('Upload berhasil tetapi gagal mendapatkan URL gambar.');
         }
       }
 
       const now = serverTimestamp();
-      const itemData = {
+      const itemData: any = {
         name: data.name.trim(),
-        quantity: Math.max(0, data.quantity),
+        quantity: Number(data.quantity),
         imageUrl: imageUrl || '',
         updatedAt: now
       };
@@ -214,29 +192,29 @@ export default function App() {
       if (editingItem) {
         const itemDoc = doc(db, 'items', editingItem.id);
         await updateDoc(itemDoc, itemData);
-        toast.success(`${data.name} berhasil diperbarui`);
+        toast.success(`${data.name} berhasil diperbarui`, { id: toastId });
       } else {
-        const newItem = {
-          ...itemData,
-          createdAt: now,
-          createdBy: user.uid,
-        };
-        await addDoc(collection(db, 'items'), newItem);
-        toast.success(`${data.name} berhasil ditambahkan`);
+        itemData.createdAt = now;
+        itemData.createdBy = user.uid;
+        await addDoc(collection(db, 'items'), itemData);
+        toast.success(`${data.name} berhasil ditambahkan`, { id: toastId });
       }
+      
+      setIsModalOpen(false);
+      setEditingItem(null);
     } catch (error: any) {
       console.error('Save Error:', error);
       let errorMessage = 'Gagal menyimpan barang';
       
       if (error.code === 'storage/unauthorized') {
-        errorMessage = 'Akses ditolak. Silakan login kembali.';
-      } else if (error.message && error.message.includes('timeout')) {
-        errorMessage = 'Koneksi lambat. Gunakan gambar yang lebih kecil atau periksa sinyal.';
+        errorMessage = 'Akses Storage ditolak. Periksa aturan keamanan.';
+      } else if (error.code === 'permission-denied') {
+        errorMessage = 'Akses Firestore ditolak. Periksa aturan keamanan.';
       } else if (error.message) {
         errorMessage = error.message;
       }
       
-      toast.error(errorMessage);
+      toast.error(errorMessage, { id: toastId });
       throw error;
     }
   };
