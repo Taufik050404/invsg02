@@ -136,8 +136,11 @@ export default function App() {
     try {
       // Direct username/password check as requested (admin / admin123)
       if (username === 'admin' && password === 'admin123') {
+        // Actually sign in to Firebase to get a real token for Security Rules
+        const result = await signInAnonymously(auth);
+        
         localStorage.setItem(AUTH_KEY, 'true');
-        setUser({ uid: 'admin_user' } as any); // Set a mock user object
+        setUser(result.user);
         toast.success('Selamat datang, Admin!');
       } else {
         throw new Error('Username atau password salah');
@@ -186,17 +189,24 @@ export default function App() {
           }
         };
 
-        // Retry logic for upload
+        // Retry logic for upload with timeout
         let uploadResult;
         let retries = 3;
         while (retries > 0) {
           try {
-            uploadResult = await uploadBytes(storageRef, data.imageFile, metadata);
+            // Promise with timeout for upload
+            const uploadPromise = uploadBytes(storageRef, data.imageFile, metadata);
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Upload timeout: Koneksi terlalu lambat')), 20000)
+            );
+            
+            uploadResult = await Promise.race([uploadPromise, timeoutPromise]) as any;
             break;
-          } catch (uploadError) {
+          } catch (uploadError: any) {
+            console.warn(`Upload attempt failed. Retries left: ${retries - 1}`, uploadError);
             retries--;
             if (retries === 0) throw uploadError;
-            await new Promise(resolve => setTimeout(resolve, 1000)); // wait 1s
+            await new Promise(resolve => setTimeout(resolve, 1500)); // wait 1.5s
           }
         }
         
@@ -209,33 +219,42 @@ export default function App() {
         }
       }
 
+      const now = Date.now();
       const itemData = {
         name: data.name.trim(),
         quantity: Math.max(0, data.quantity),
-        imageUrl,
+        imageUrl: imageUrl || '',
       };
 
       if (editingItem) {
         const itemDoc = doc(db, 'items', editingItem.id);
-        await updateDoc(itemDoc, {
+        const updateData = {
           ...itemData,
-          updatedAt: Date.now(),
-        });
+          updatedAt: now,
+        };
+        await updateDoc(itemDoc, updateData);
         toast.success(`${data.name} berhasil diperbarui`);
       } else {
-        await addDoc(collection(db, 'items'), {
+        const newItem = {
           ...itemData,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+          createdAt: now,
+          updatedAt: now,
           createdBy: user.uid,
-        });
+        };
+        await addDoc(collection(db, 'items'), newItem);
         toast.success(`${data.name} berhasil ditambahkan`);
       }
     } catch (error: any) {
       console.error('Save Error:', error);
-      const errorMessage = error.code === 'storage/unauthorized' 
-        ? 'Error: Akses ditolak. Pastikan Anda sudah login.' 
-        : `Gagal menyimpan: ${error.message || 'Unknown error'}`;
+      let errorMessage = 'Gagal menyimpan barang';
+      
+      if (error.code === 'storage/unauthorized') {
+        errorMessage = 'Akses ditolak. Silakan login kembali.';
+      } else if (error.message && error.message.includes('timeout')) {
+        errorMessage = 'Koneksi lambat. Gunakan gambar yang lebih kecil atau periksa sinyal.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
       
       toast.error(errorMessage);
       throw error;

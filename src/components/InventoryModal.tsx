@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Package, Hash, Save, AlertCircle, Camera, Image as ImageIcon, RefreshCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import imageCompression from 'browser-image-compression';
 import { InventoryItem } from '../types';
 import CameraCapture from './CameraCapture';
 
@@ -64,7 +65,7 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     onClose();
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       // Validate format
@@ -76,38 +77,72 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
         return;
       }
 
-      // Validate size (5MB as requested)
-      if (file.size > 5 * 1024 * 1024) {
-        setError('Ukuran gambar maksimal 5MB. Silakan kompres gambar Anda.');
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // Compression Options
+        const options = {
+          maxSizeMB: 1, // Max size 1MB for speed
+          maxWidthOrHeight: 1280,
+          useWebWorker: true,
+        };
+        
+        const compressedFile = await imageCompression(file, options);
+
+        // Clean up old preview if it was a blob
+        if (imagePreview && imagePreview.startsWith('blob:')) {
+          URL.revokeObjectURL(imagePreview);
+        }
+        
+        const url = URL.createObjectURL(compressedFile);
+        setImagePreview(url);
+        setImageFile(compressedFile);
+        setShowSourceChoice(false);
+      } catch (err) {
+        console.error('Compression Error:', err);
+        setError('Gagal memproses gambar. Silakan coba lagi.');
+      } finally {
+        setIsLoading(false);
+        // Reset input value to allow selecting the same file again if needed
         if (fileInputRef.current) fileInputRef.current.value = '';
         if (cameraInputRef.current) cameraInputRef.current.value = '';
-        return;
       }
+    }
+  };
+
+  const handleCameraCapture = async (blob: Blob, previewUrl: string) => {
+    setIsLoading(true);
+    try {
+      // Compress captured image too
+      const options = {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1280,
+        useWebWorker: true,
+      };
+
+      // Convert Blob to File for compression library if needed
+      const file = new File([blob], 'camera_capture.jpg', { type: 'image/jpeg' });
+      const compressedFile = await imageCompression(file, options);
 
       // Clean up old preview if it was a blob
       if (imagePreview && imagePreview.startsWith('blob:')) {
         URL.revokeObjectURL(imagePreview);
       }
       
-      const url = URL.createObjectURL(file);
-      setImagePreview(url);
-      setImageFile(file);
-      setShowSourceChoice(false);
-      
-      // Reset input value to allow selecting the same file again if needed
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      if (cameraInputRef.current) cameraInputRef.current.value = '';
-    }
-  };
+      const newUrl = URL.createObjectURL(compressedFile);
+      setImagePreview(newUrl);
+      setImageFile(compressedFile);
+      setIsCameraActive(false);
 
-  const handleCameraCapture = (blob: Blob, previewUrl: string) => {
-    // Clean up old preview if it was a blob
-    if (imagePreview && imagePreview.startsWith('blob:')) {
-      URL.revokeObjectURL(imagePreview);
+      // Revoke the temporary preview from CameraCapture
+      URL.revokeObjectURL(previewUrl);
+    } catch (err) {
+      console.error('Camera Capture Compression Error:', err);
+      setError('Gagal memproses foto dari kamera.');
+    } finally {
+      setIsLoading(false);
     }
-    setImagePreview(previewUrl);
-    setImageFile(blob);
-    setIsCameraActive(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -397,7 +432,7 @@ function InventoryModalContent({
                   ) : (
                     <>
                       <Save className="w-5 h-5" />
-                      <span>{editItem ? 'Update Barang' : 'Simpan Barang'}</span>
+                      <span>{isLoading ? 'Menyimpan...' : (editItem ? 'Update Barang' : 'Simpan Barang')}</span>
                     </>
                   )}
                 </button>
