@@ -1,14 +1,11 @@
 import React from 'react';
 import { Search, Bell, User, Menu } from 'lucide-react';
-import { auth } from '../lib/firebase';
 
 interface NavbarProps {
   onMenuClick: () => void;
 }
 
 export default function Navbar({ onMenuClick }: NavbarProps) {
-  const user = auth.currentUser;
-
   return (
     <header id="navbar" className="h-20 bg-white border-bottom border-gray-100 px-4 md:px-8 flex items-center justify-between sticky top-0 z-40">
       <div className="flex items-center gap-4 flex-1">

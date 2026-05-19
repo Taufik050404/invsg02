@@ -20,18 +20,12 @@ import {
   uploadBytes, 
   getDownloadURL 
 } from 'firebase/storage';
-import { 
-  onAuthStateChanged, 
-  signOut, 
-  User,
-  signInAnonymously
-} from 'firebase/auth';
 import { Plus, Download, Edit2, Trash2, ChevronLeft, ChevronRight, Package2 } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
 import { format as formatDate } from 'date-fns';
 
-import { db, auth, storage } from './lib/firebase';
+import { db, storage } from './lib/firebase';
 import { InventoryItem, OperationType } from './types';
 import { exportToPDF, exportToWord, exportToExcel } from './lib/exportUtils';
 import Sidebar from './components/Sidebar';
@@ -43,10 +37,6 @@ import LoginForm from './components/LoginForm';
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-    },
     operationType,
     path
   };
@@ -55,7 +45,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<{ uid: string } | null>(null);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('inventory');
@@ -77,15 +67,12 @@ export default function App() {
   const itemsPerPage = 6;
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      const isAuthenticated = localStorage.getItem(AUTH_KEY) === 'true';
-      if (u && isAuthenticated) {
-        setUser(u);
-      } else {
-        setUser(null);
-      }
-    });
-    return () => unsubscribe();
+    const isAuthenticated = localStorage.getItem(AUTH_KEY) === 'true';
+    if (isAuthenticated) {
+      setUser({ uid: 'admin_session' });
+    } else {
+      setUser(null);
+    }
   }, []);
 
   const handleExport = async (type: 'pdf' | 'excel' | 'word') => {
@@ -136,11 +123,8 @@ export default function App() {
     try {
       // Direct username/password check as requested (admin / admin123)
       if (username === 'admin' && password === 'admin123') {
-        // Actually sign in to Firebase to get a real token for Security Rules
-        const result = await signInAnonymously(auth);
-        
         localStorage.setItem(AUTH_KEY, 'true');
-        setUser(result.user);
+        setUser({ uid: 'admin_session' });
         toast.success('Selamat datang, Admin!');
       } else {
         throw new Error('Username atau password salah');
