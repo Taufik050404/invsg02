@@ -106,10 +106,13 @@ export default function App() {
 
     const q = query(collection(db, 'items'), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as InventoryItem[];
+      const data = snapshot.docs.map(doc => {
+        const docData = doc.data();
+        return {
+          ...docData,
+          id: doc.id
+        };
+      }) as InventoryItem[];
       setItems(data);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'items');
@@ -147,7 +150,7 @@ export default function App() {
     }
   };
 
-  const saveItem = async (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { imageFile?: File | Blob }) => {
+  const saveItem = async (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { imageFile?: File | Blob | null }) => {
     if (!user) {
       toast.error('Gagal menyimpan: Session tidak ditemukan. Silakan login kembali.');
       return;

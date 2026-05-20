@@ -32,7 +32,11 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Kamera tidak didukung di browser ini.');
+        const isHttp = window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+        if (isHttp) {
+          throw new Error('Kamera diblokir karena koneksi tidak aman (HTTP). Akses dari alamat HTTPS atau buka di localhost/127.0.0.1.');
+        }
+        throw new Error('Kamera tidak didukung atau diblokir di browser ini.');
       }
 
       const mediaStream = await navigator.mediaDevices.getUserMedia({
