@@ -106,11 +106,17 @@ export default function App() {
 
     const q = query(collection(db, 'items'), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => {
+      const seenIds = new Set<string>();
+      const data = snapshot.docs.map((doc, idx) => {
         const docData = doc.data();
+        let safeId = doc.id;
+        if (!safeId || seenIds.has(safeId)) {
+          safeId = `${doc.id || 'item'}_dup_${idx}_${Date.now()}`;
+        }
+        seenIds.add(safeId);
         return {
           ...docData,
-          id: doc.id
+          id: safeId
         };
       }) as InventoryItem[];
       setItems(data);
@@ -382,7 +388,7 @@ export default function App() {
                       <AnimatePresence mode="popLayout">
                         {paginatedItems.map((item, index) => (
                           <motion.tr 
-                            key={item.id}
+                            key={item.id || `item-row-${index}`}
                             layout
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
