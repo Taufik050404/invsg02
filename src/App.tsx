@@ -68,7 +68,7 @@ type ItemPayload = {
   createdBy?: string;
 };
 
-const firestoreBaseUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+const firestoreBaseUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents`;
 
 function itemToFirestoreFields(item: ItemPayload, includeCreatedAt = false) {
   const now = new Date().toISOString();
@@ -102,13 +102,36 @@ async function firestoreRestRequest<T>(url: string, init: RequestInit, timeoutMs
     });
 
     if (!response.ok) {
-      const message = await response.text();
-      throw new Error(message || `Firestore REST error ${response.status}`);
+      const message = await getFirestoreRestErrorMessage(response);
+      throw new Error(message);
     }
 
     return await response.json() as T;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function getFirestoreRestErrorMessage(response: Response) {
+  try {
+    const body = await response.json();
+    const message = String(body?.error?.message || '');
+
+    if (response.status === 403 && message.toLowerCase().includes('cloud firestore api')) {
+      return 'Database Firebase belum aktif atau konfigurasi project salah.';
+    }
+
+    if (response.status === 403 || message.includes('PERMISSION_DENIED')) {
+      return 'Akses database ditolak. Periksa Firestore rules.';
+    }
+
+    if (response.status === 404) {
+      return 'Database atau data tidak ditemukan.';
+    }
+
+    return message || `Firestore error ${response.status}`;
+  } catch {
+    return `Firestore error ${response.status}`;
   }
 }
 
