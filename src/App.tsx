@@ -41,7 +41,29 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  return errInfo.error;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function normalizeItem(id: string, data: any): InventoryItem {
+  return {
+    id,
+    name: typeof data.name === 'string' ? data.name : '',
+    quantity: Number.isFinite(Number(data.quantity)) ? Number(data.quantity) : 0,
+    imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : '',
+    createdAt: data.createdAt ?? null,
+    updatedAt: data.updatedAt ?? data.createdAt ?? null,
+    createdBy: typeof data.createdBy === 'string' ? data.createdBy : '',
+  };
 }
 
 export default function App() {
@@ -106,22 +128,11 @@ export default function App() {
 
     const q = query(collection(db, 'items'), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const seenIds = new Set<string>();
-      const data = snapshot.docs.map((doc, idx) => {
-        const docData = doc.data();
-        let safeId = doc.id;
-        if (!safeId || seenIds.has(safeId)) {
-          safeId = `${doc.id || 'item'}_dup_${idx}_${Date.now()}`;
-        }
-        seenIds.add(safeId);
-        return {
-          ...docData,
-          id: safeId
-        };
-      }) as InventoryItem[];
+      const data = snapshot.docs.map((snapshotDoc) => normalizeItem(snapshotDoc.id, snapshotDoc.data()));
       setItems(data);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'items');
+      toast.error('Gagal memuat data inventaris', { id: 'items-list-error' });
     });
 
     return () => unsubscribe();
@@ -156,73 +167,97 @@ export default function App() {
     }
   };
 
-  const saveItem = async (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { imageFile?: File | Blob | null }) => {
+  const saveItem = async (data: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { imageFile?: File | null }) => {
     if (!user) {
-      toast.error('Gagal menyimpan: Session tidak ditemukan. Silakan login kembali.');
-      return;
+      throw new Error('Session tidak ditemukan. Silakan login kembali.');
     }
 
-    const toastId = toast.loading(editingItem ? 'Memperbarui barang...' : 'Menyimpan barang...');
+    const itemName = data.name.trim();
+    const itemQuantity = Number(data.quantity);
+
+    if (!itemName) {
+      throw new Error('Nama barang wajib diisi.');
+    }
+
+    if (!Number.isFinite(itemQuantity) || itemQuantity < 0) {
+      throw new Error('Jumlah harus angka valid.');
+    }
+
+    if (!data.imageUrl && !data.imageFile) {
+      throw new Error('Gambar barang wajib ada.');
+    }
+
+    const toastId = 'inventory-save';
+    toast.loading(editingItem ? 'Memperbarui barang...' : 'Menyimpan barang...', { id: toastId });
 
     try {
       let imageUrl = data.imageUrl;
 
-      // If there's a new file to upload
       if (data.imageFile) {
         const timestamp = Date.now();
-        const fileExtension = data.imageFile.type?.split('/')[1] || 'jpg';
-        const safeName = data.name.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 15);
-        const fileName = `inventory/${timestamp}_${safeName}.${fileExtension}`;
-        
-        const storageRef = ref(storage, fileName);
-        
-        // Metadata
-        const metadata = {
-          contentType: data.imageFile.type || 'image/jpeg'
-        };
+        const safeName = itemName.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 40) || 'barang';
+        const storageRef = ref(storage, `inventory/${timestamp}-${safeName}.jpg`);
 
-        // Simple upload without complex race timeout for better compatibility
-        const uploadResult = await uploadBytes(storageRef, data.imageFile, metadata);
-        imageUrl = await getDownloadURL(uploadResult.ref);
-        
-        if (!imageUrl) {
-          throw new Error('Upload berhasil tetapi gagal mendapatkan URL gambar.');
-        }
+        const uploadResult = await withTimeout(
+          uploadBytes(storageRef, data.imageFile, {
+            contentType: data.imageFile.type || 'image/jpeg',
+            cacheControl: 'public,max-age=31536000',
+          }),
+          20000,
+          'Upload gambar terlalu lama. Silakan coba lagi.'
+        );
+
+        imageUrl = await withTimeout(
+          getDownloadURL(uploadResult.ref),
+          10000,
+          'Gagal mendapatkan URL gambar.'
+        );
       }
 
       const now = serverTimestamp();
-      const itemData: any = {
-        name: data.name.trim(),
-        quantity: Number(data.quantity),
-        imageUrl: imageUrl || '',
-        updatedAt: now
+      const itemData = {
+        name: itemName,
+        quantity: itemQuantity,
+        imageUrl,
+        updatedAt: now,
       };
 
       if (editingItem) {
         const itemDoc = doc(db, 'items', editingItem.id);
-        await updateDoc(itemDoc, itemData);
-        toast.success(`${data.name} berhasil diperbarui`, { id: toastId });
+        await withTimeout(
+          updateDoc(itemDoc, itemData),
+          15000,
+          'Request update database terlalu lama.'
+        );
+        toast.success('Barang berhasil diperbarui', { id: toastId });
       } else {
-        itemData.createdAt = now;
-        itemData.createdBy = user.uid;
-        await addDoc(collection(db, 'items'), itemData);
-        toast.success(`${data.name} berhasil ditambahkan`, { id: toastId });
+        await withTimeout(
+          addDoc(collection(db, 'items'), {
+            ...itemData,
+            createdAt: now,
+            createdBy: user.uid,
+          }),
+          15000,
+          'Request simpan database terlalu lama.'
+        );
+        toast.success('Barang berhasil disimpan', { id: toastId });
       }
-      
-      setIsModalOpen(false);
-      setEditingItem(null);
+
+      setCurrentPage(1);
     } catch (error: any) {
       console.error('Save Error:', error);
       let errorMessage = 'Gagal menyimpan barang';
-      
+
       if (error.code === 'storage/unauthorized') {
-        errorMessage = 'Akses Storage ditolak. Periksa aturan keamanan.';
+        errorMessage = 'Upload gambar gagal. Periksa Firebase Storage rules.';
       } else if (error.code === 'permission-denied') {
-        errorMessage = 'Akses Firestore ditolak. Periksa aturan keamanan.';
+        errorMessage = 'Gagal menyimpan data barang. Periksa Firestore rules.';
+      } else if (error.message?.includes('network') || error.message?.includes('fetch')) {
+        errorMessage = 'Koneksi terlalu lambat. Periksa internet Anda.';
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       toast.error(errorMessage, { id: toastId });
       throw error;
     }
@@ -237,14 +272,19 @@ export default function App() {
     if (!itemToDelete) return;
     
     setIsDeleting(true);
+    const toastId = 'inventory-delete';
     try {
-      await deleteDoc(doc(db, 'items', itemToDelete.id));
-      toast.success('Data barang berhasil dihapus');
+      await withTimeout(
+        deleteDoc(doc(db, 'items', itemToDelete.id)),
+        15000,
+        'Request hapus database terlalu lama.'
+      );
+      toast.success('Data barang berhasil dihapus', { id: toastId });
       setIsDeleteModalOpen(false);
       setItemToDelete(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `items/${itemToDelete.id}`);
-      toast.error('Gagal menghapus data barang');
+      toast.error('Gagal menghapus data barang', { id: toastId });
     } finally {
       setIsDeleting(false);
     }
@@ -252,7 +292,7 @@ export default function App() {
 
   const filteredItems = useMemo(() => {
     return items.filter(item => 
-      item.name.toLowerCase().includes(searchTerm.toLowerCase())
+      item.name.toLowerCase().includes(searchTerm.trim().toLowerCase())
     );
   }, [items, searchTerm]);
 
@@ -341,7 +381,7 @@ export default function App() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                 {[
                   { label: 'Total Barang', value: items.length, icon: Package2, color: 'bg-blue-600' },
-                  { label: 'Total Unit', value: items.reduce((acc, curr) => acc + curr.quantity, 0), icon: Package2, color: 'bg-indigo-600' },
+                  { label: 'Total Unit', value: items.reduce((acc, curr) => acc + Number(curr.quantity || 0), 0), icon: Package2, color: 'bg-indigo-600' },
                   { label: 'Kategori', value: 'Umum', icon: Package2, color: 'bg-emerald-600' },
                 ].map((stat, i) => (
                   <div key={i} className="bg-white p-6 md:p-8 rounded-[2rem] border border-gray-100 shadow-sm flex items-center gap-4 md:gap-6 group hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
@@ -364,6 +404,7 @@ export default function App() {
                     <input 
                       type="text" 
                       placeholder="Cari kata kunci..." 
+                      value={searchTerm}
                       className="bg-transparent border-none text-sm px-4 py-2 focus:ring-0 w-full sm:w-60"
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -388,7 +429,7 @@ export default function App() {
                       <AnimatePresence mode="popLayout">
                         {paginatedItems.map((item, index) => (
                           <motion.tr 
-                            key={item.id || `item-row-${index}`}
+                            key={item.id}
                             layout
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
@@ -400,7 +441,13 @@ export default function App() {
                             </td>
                             <td className="px-6 md:px-8 py-6">
                               <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden bg-gray-100 border border-gray-200 shadow-sm transition-all group-hover:scale-105 group-hover:shadow-md">
-                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                {item.imageUrl ? (
+                                  <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <Package2 className="w-6 h-6 text-gray-300" />
+                                  </div>
+                                )}
                               </div>
                             </td>
                             <td className="px-6 md:px-8 py-6">
@@ -539,4 +586,3 @@ function format(timestamp: any, formatStr: string) {
     return '-';
   }
 }
-

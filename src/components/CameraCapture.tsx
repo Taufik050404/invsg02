@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, X, RefreshCcw, Check, AlertCircle, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 
 interface CameraCaptureProps {
   onCapture: (blob: Blob, previewUrl: string) => void;
   onClose: () => void;
+}
+
+// Cek apakah browser mendukung getUserMedia (butuh HTTPS atau localhost)
+function isGetUserMediaSupported(): boolean {
+  return !!(
+    navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getUserMedia === 'function'
+  );
 }
 
 export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
@@ -13,14 +21,28 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
+  const [useInputFallback, setUseInputFallback] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const capturedPreviewRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Jika tidak mendukung getUserMedia (HTTP non-localhost), langsung fallback
+    if (!isGetUserMediaSupported()) {
+      setUseInputFallback(true);
+      setIsLoading(false);
+      // Langsung buka file input kamera
+      setTimeout(() => fileInputRef.current?.click(), 100);
+      return;
+    }
+
     startCamera();
     return () => {
       stopCamera();
+      if (capturedPreviewRef.current) URL.revokeObjectURL(capturedPreviewRef.current);
     };
   }, []);
 
@@ -31,23 +53,16 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
     setCapturedPreview(null);
 
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        const isHttp = window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-        if (isHttp) {
-          throw new Error('Kamera diblokir karena koneksi tidak aman (HTTP). Akses dari alamat HTTPS atau buka di localhost/127.0.0.1.');
-        }
-        throw new Error('Kamera tidak didukung atau diblokir di browser ini.');
-      }
-
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { 
+        video: {
           facingMode: 'environment',
           width: { ideal: 1920 },
-          height: { ideal: 1080 }
+          height: { ideal: 1080 },
         },
-        audio: false
+        audio: false,
       });
 
+      streamRef.current = mediaStream;
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -55,55 +70,73 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
       setIsLoading(false);
     } catch (err: any) {
       console.error('Camera Access Error:', err);
-      setError(
-        err.name === 'NotAllowedError' 
-          ? 'Akses kamera ditolak. Silakan izinkan di pengaturan browser.' 
-          : 'Gagal mengakses kamera. Pastikan perangkat memiliki kamera.'
-      );
+
+      if (
+        err.name === 'NotAllowedError' ||
+        err.name === 'PermissionDeniedError'
+      ) {
+        setError('Akses kamera ditolak. Silakan izinkan di pengaturan browser.');
+      } else if (
+        err.name === 'NotFoundError' ||
+        err.name === 'DevicesNotFoundError'
+      ) {
+        setError('Kamera tidak ditemukan di perangkat ini.');
+      } else if (
+        err.name === 'NotSupportedError' ||
+        err.name === 'TypeError'
+      ) {
+        // HTTP environment — fallback ke input
+        setUseInputFallback(true);
+        setTimeout(() => fileInputRef.current?.click(), 100);
+      } else {
+        setError('Gagal mengakses kamera: ' + (err.message || err.name));
+      }
+
       setIsLoading(false);
     }
   };
 
   const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
+    setStream(null);
   };
 
   const capturePhoto = () => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      
-      // Use actual video dimensions for high quality
+
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      
+
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const url = URL.createObjectURL(blob);
-            setCapturedBlob(blob);
-            setCapturedPreview(url);
-            // Stop stream to save memory after capture
-            if (stream) {
-              stream.getTracks().forEach(track => track.stop());
-              setStream(null);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              capturedPreviewRef.current = url;
+              setCapturedBlob(blob);
+              setCapturedPreview(url);
+              stopCamera();
             }
-          }
-        }, 'image/jpeg', 0.85);
+          },
+          'image/jpeg',
+          0.85
+        );
       }
     }
   };
 
   const handleRetake = () => {
-    if (capturedPreview) {
-      URL.revokeObjectURL(capturedPreview);
-    }
+    if (capturedPreview) URL.revokeObjectURL(capturedPreview);
+    capturedPreviewRef.current = null;
+    setCapturedBlob(null);
+    setCapturedPreview(null);
     startCamera();
   };
 
@@ -113,13 +146,59 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
     }
   };
 
+  // Fallback: handle file input dari <input capture>
+  const handleFallbackInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      onClose();
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    // Kirim langsung sebagai Blob ke parent
+    onCapture(file, url);
+  };
+
+  // ── FALLBACK MODE (HTTP / no getUserMedia) ──
+  if (useInputFallback) {
+    return (
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handleFallbackInput}
+          onBlur={onClose} // tutup jika user cancel
+        />
+        <div className="p-8 text-center max-w-sm">
+          <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Camera className="w-10 h-10 text-white" />
+          </div>
+          <p className="text-gray-400 text-sm mb-8 leading-relaxed">
+            Membuka kamera perangkat...
+          </p>
+          <button
+            onClick={onClose}
+            className="w-full bg-white/10 text-white py-4 rounded-2xl font-bold active:scale-95 transition-all"
+          >
+            Batal
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── NORMAL MODE (HTTPS / localhost) ──
   return (
     <div className="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center overflow-hidden font-sans">
       <div className="relative w-full h-full max-w-4xl mx-auto flex flex-col">
-        {/* Header Overlay */}
+
+        {/* Header */}
         <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-10 bg-gradient-to-b from-black/60 to-transparent">
           <h3 className="text-white font-bold tracking-tight">Kamera Barang</h3>
-          <button 
+          <button
             onClick={onClose}
             className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-md transition-all active:scale-95"
           >
@@ -127,7 +206,7 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
           </button>
         </div>
 
-        {/* Camera Preview Area */}
+        {/* Preview Area */}
         <div className="flex-1 relative flex items-center justify-center bg-zinc-900 overflow-hidden">
           {isLoading && (
             <div className="flex flex-col items-center gap-4 text-white">
@@ -143,7 +222,7 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
               </div>
               <h4 className="text-white text-xl font-bold mb-3">Terjadi Kesalahan</h4>
               <p className="text-gray-400 text-sm mb-8 leading-relaxed">{error}</p>
-              <button 
+              <button
                 onClick={onClose}
                 className="w-full bg-white text-black py-4 rounded-2xl font-bold active:scale-95 transition-all"
               >
@@ -153,19 +232,21 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
           ) : (
             <>
               {capturedPreview ? (
-                <motion.div 
+                <motion.div
+                  key="captured"
                   initial={{ opacity: 0, scale: 1.1 }}
                   animate={{ opacity: 1, scale: 1 }}
                   className="w-full h-full"
                 >
-                  <img 
-                    src={capturedPreview} 
-                    alt="Captured" 
-                    className="w-full h-full object-contain md:object-cover" 
+                  <img
+                    src={capturedPreview}
+                    alt="Captured"
+                    className="w-full h-full object-contain md:object-cover"
                   />
                 </motion.div>
               ) : (
                 <video
+                  key="live"
                   ref={videoRef}
                   autoPlay
                   playsInline
@@ -179,21 +260,18 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
           <canvas ref={canvasRef} className="hidden" />
         </div>
 
-        {/* Controls Overlay */}
+        {/* Controls */}
         {!error && !isLoading && (
           <div className="p-8 pb-12 md:pb-8 flex justify-center items-center gap-8 bg-gradient-to-t from-black/80 to-transparent absolute bottom-0 left-0 right-0">
             {capturedPreview ? (
               <div className="flex items-center gap-6 w-full max-w-md justify-center">
-                <button
-                  onClick={handleRetake}
-                  className="flex flex-col items-center gap-2 group"
-                >
+                <button onClick={handleRetake} className="flex flex-col items-center gap-2 group">
                   <div className="w-14 h-14 bg-white/10 rounded-full flex items-center justify-center text-white backdrop-blur-md hover:bg-white/20 transition-all border border-white/20">
                     <RefreshCcw className="w-6 h-6" />
                   </div>
                   <span className="text-[10px] font-bold text-white uppercase tracking-widest opacity-60 group-hover:opacity-100">Ulangi</span>
                 </button>
-                
+
                 <button
                   onClick={handleUsePhoto}
                   className="flex-1 bg-black border-2 border-white text-white h-16 rounded-full flex items-center justify-center gap-3 font-bold text-lg active:scale-95 transition-all hover:bg-white hover:text-black shadow-[0_0_20px_rgba(255,255,255,0.2)]"
@@ -211,10 +289,11 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
                   <div className="w-16 h-16 border-2 border-black/10 rounded-full flex items-center justify-center">
                     <Camera className="w-8 h-8 text-black" />
                   </div>
-                  {/* Shutter visual effect */}
                   <div className="absolute inset-0 bg-black/5 rounded-full scale-0 group-active:scale-100 transition-transform duration-75" />
                 </button>
-                <span className="text-[10px] font-bold text-white uppercase tracking-widest opacity-60">Tekan untuk Memfoto</span>
+                <span className="text-[10px] font-bold text-white uppercase tracking-widest opacity-60">
+                  Tekan untuk Memfoto
+                </span>
               </div>
             )}
           </div>
