@@ -7,11 +7,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   onSnapshot, 
-  updateDoc, 
-  doc, 
   query, 
-  orderBy, 
-  serverTimestamp 
+  orderBy
 } from 'firebase/firestore';
 import { 
   ref, 
@@ -66,12 +63,15 @@ type ItemPayload = {
   quantity: number;
   imageUrl: string;
   createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 const firestoreBaseUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents`;
+const LOCAL_ITEMS_KEY = 'inventory_items_cache_v2';
 
 function itemToFirestoreFields(item: ItemPayload, includeCreatedAt = false) {
-  const now = new Date().toISOString();
+  const now = item.updatedAt || new Date().toISOString();
   const fields: Record<string, unknown> = {
     name: { stringValue: item.name },
     quantity: { integerValue: String(item.quantity) },
@@ -80,7 +80,7 @@ function itemToFirestoreFields(item: ItemPayload, includeCreatedAt = false) {
   };
 
   if (includeCreatedAt) {
-    fields.createdAt = { timestampValue: now };
+    fields.createdAt = { timestampValue: item.createdAt || now };
     fields.createdBy = { stringValue: item.createdBy || 'admin_session' };
   }
 
@@ -168,6 +168,36 @@ async function deleteItemRest(itemId: string) {
   );
 }
 
+function loadLocalItems(): InventoryItem[] {
+  try {
+    const rawItems = localStorage.getItem(LOCAL_ITEMS_KEY);
+    if (!rawItems) return [];
+    const parsedItems = JSON.parse(rawItems);
+    return Array.isArray(parsedItems) ? parsedItems.map((item) => normalizeItem(item.id, item)) : [];
+  } catch (error) {
+    console.warn('Gagal membaca cache inventaris:', error);
+    return [];
+  }
+}
+
+function saveLocalItems(nextItems: InventoryItem[]) {
+  localStorage.setItem(LOCAL_ITEMS_KEY, JSON.stringify(nextItems));
+}
+
+function toPlainItem(item: InventoryItem): InventoryItem {
+  const now = new Date().toISOString();
+
+  return {
+    id: item.id,
+    name: item.name,
+    quantity: Number(item.quantity || 0),
+    imageUrl: item.imageUrl || '',
+    createdAt: item.createdAt || now,
+    updatedAt: item.updatedAt || now,
+    createdBy: item.createdBy || 'admin_session',
+  };
+}
+
 function normalizeItem(id: string, data: any): InventoryItem {
   return {
     id,
@@ -206,6 +236,7 @@ export default function App() {
     const isAuthenticated = localStorage.getItem(AUTH_KEY) === 'true';
     if (isAuthenticated) {
       setUser({ uid: 'admin_session' });
+      setItems(loadLocalItems());
     } else {
       setUser(null);
     }
@@ -240,13 +271,16 @@ export default function App() {
       return;
     }
 
+    setItems(loadLocalItems());
+
     const q = query(collection(db, 'items'), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map((snapshotDoc) => normalizeItem(snapshotDoc.id, snapshotDoc.data()));
+      saveLocalItems(data);
       setItems(data);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'items');
-      toast.error('Gagal memuat data inventaris', { id: 'items-list-error' });
+      console.warn('Cloud database tidak bisa dimuat, memakai data lokal.');
     });
 
     return () => unsubscribe();
@@ -259,6 +293,7 @@ export default function App() {
       if (username === 'admin' && password === 'admin123') {
         localStorage.setItem(AUTH_KEY, 'true');
         setUser({ uid: 'admin_session' });
+        setItems(loadLocalItems());
         toast.success('Selamat datang, Admin!');
       } else {
         throw new Error('Username atau password salah');
@@ -325,9 +360,11 @@ export default function App() {
           'Background URL timeout.'
         );
 
-        await updateDoc(doc(db, 'items', itemId), {
+        await updateItemRest(itemId, {
+          name: itemName,
+          quantity: itemQuantity,
           imageUrl: storageUrl,
-          updatedAt: serverTimestamp(),
+          updatedAt: new Date().toISOString(),
         });
       } catch (error) {
         console.warn('Upload Storage dilewati, gambar data URL tetap dipakai:', error);
@@ -345,29 +382,52 @@ export default function App() {
         );
       }
 
-      const now = serverTimestamp();
+      const now = new Date().toISOString();
+      const localId = editingItem?.id || `local-${Date.now()}`;
       const itemData = {
         name: itemName,
         quantity: itemQuantity,
         imageUrl,
         updatedAt: now,
       };
+      const localItem = toPlainItem({
+        id: localId,
+        ...itemData,
+        createdAt: editingItem?.createdAt || now,
+        createdBy: editingItem?.createdBy || user.uid,
+      });
 
       if (editingItem) {
-        await updateItemRest(editingItem.id, itemData);
+        setItems((currentItems) => {
+          const nextItems = currentItems.map((item) => item.id === editingItem.id ? localItem : item);
+          saveLocalItems(nextItems);
+          return nextItems;
+        });
         toast.success('Barang berhasil diperbarui', { id: toastId });
+        void updateItemRest(editingItem.id, itemData).catch((error) => {
+          console.warn('Sync update ke Firebase gagal, data lokal tetap tersimpan:', error);
+        });
         if (data.imageFile) {
           void uploadImageInBackground(editingItem.id, data.imageFile);
         }
       } else {
-        const docId = await createItemRest({
-          ...itemData,
-          createdBy: user.uid,
+        setItems((currentItems) => {
+          const nextItems = [localItem, ...currentItems];
+          saveLocalItems(nextItems);
+          return nextItems;
         });
         toast.success('Barang berhasil disimpan', { id: toastId });
-        if (data.imageFile && docId) {
-          void uploadImageInBackground(docId, data.imageFile);
-        }
+        void createItemRest({
+          ...itemData,
+          createdAt: now,
+          createdBy: user.uid,
+        }).then((docId) => {
+          if (data.imageFile && docId) {
+            void uploadImageInBackground(docId, data.imageFile);
+          }
+        }).catch((error) => {
+          console.warn('Sync tambah ke Firebase gagal, data lokal tetap tersimpan:', error);
+        });
       }
 
       setCurrentPage(1);
@@ -401,10 +461,17 @@ export default function App() {
     setIsDeleting(true);
     const toastId = 'inventory-delete';
     try {
-      await deleteItemRest(itemToDelete.id);
+      setItems((currentItems) => {
+        const nextItems = currentItems.filter((item) => item.id !== itemToDelete.id);
+        saveLocalItems(nextItems);
+        return nextItems;
+      });
       toast.success('Data barang berhasil dihapus', { id: toastId });
       setIsDeleteModalOpen(false);
       setItemToDelete(null);
+      void deleteItemRest(itemToDelete.id).catch((error) => {
+        console.warn('Sync hapus ke Firebase gagal, data lokal sudah dihapus:', error);
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `items/${itemToDelete.id}`);
       toast.error('Gagal menghapus data barang', { id: toastId });
