@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { LayoutDashboard, Package, LogOut, Settings, Info, X } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
 interface SidebarProps {
@@ -19,6 +19,19 @@ const menuItems = [
 ];
 
 export default function Sidebar({ activeTab, setActiveTab, onLogout, isOpen, onClose }: SidebarProps) {
+  useEffect(() => {
+    if (!isOpen || !onClose) return;
+
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const handleResize = () => {
+      if (mediaQuery.matches) onClose();
+    };
+
+    handleResize();
+    mediaQuery.addEventListener('change', handleResize);
+    return () => mediaQuery.removeEventListener('change', handleResize);
+  }, [isOpen, onClose]);
+
   const handleItemClick = (id: string) => {
     setActiveTab(id);
     if (onClose) onClose();
@@ -26,23 +39,10 @@ export default function Sidebar({ activeTab, setActiveTab, onLogout, isOpen, onC
 
   return (
     <>
-      {/* Mobile Overlay */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[50] lg:hidden"
-          />
-        )}
-      </AnimatePresence>
-
       <div 
         id="sidebar" 
         className={cn(
-          "fixed inset-y-0 left-0 z-[60] w-72 bg-[#141414] text-white flex flex-col border-r border-[#2a2a2a] transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-[60] w-72 bg-[#141414] text-white flex flex-col border-r border-[#2a2a2a] transition-transform duration-300 ease-in-out lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -56,7 +56,8 @@ export default function Sidebar({ activeTab, setActiveTab, onLogout, isOpen, onC
           
           <button 
             onClick={onClose}
-            className="lg:hidden p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-xl transition-all"
+            className="lg:hidden p-3 text-gray-300 hover:text-white hover:bg-gray-800 rounded-xl transition-all"
+            aria-label="Tutup menu"
           >
             <X className="w-6 h-6" />
           </button>
