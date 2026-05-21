@@ -7,9 +7,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   onSnapshot, 
-  addDoc, 
   updateDoc, 
-  deleteDoc, 
   doc, 
   query, 
   orderBy, 
@@ -25,7 +23,7 @@ import { Toaster, toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
 import { format as formatDate } from 'date-fns';
 
-import { db, storage } from './lib/firebase';
+import { db, firebaseConfig, storage } from './lib/firebase';
 import { InventoryItem, OperationType } from './types';
 import { exportToPDF, exportToWord, exportToExcel } from './lib/exportUtils';
 import Sidebar from './components/Sidebar';
@@ -61,6 +59,90 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('Gagal membaca gambar.'));
     reader.readAsDataURL(file);
   });
+}
+
+type ItemPayload = {
+  name: string;
+  quantity: number;
+  imageUrl: string;
+  createdBy?: string;
+};
+
+const firestoreBaseUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+
+function itemToFirestoreFields(item: ItemPayload, includeCreatedAt = false) {
+  const now = new Date().toISOString();
+  const fields: Record<string, unknown> = {
+    name: { stringValue: item.name },
+    quantity: { integerValue: String(item.quantity) },
+    imageUrl: { stringValue: item.imageUrl },
+    updatedAt: { timestampValue: now },
+  };
+
+  if (includeCreatedAt) {
+    fields.createdAt = { timestampValue: now };
+    fields.createdBy = { stringValue: item.createdBy || 'admin_session' };
+  }
+
+  return fields;
+}
+
+async function firestoreRestRequest<T>(url: string, init: RequestInit, timeoutMs = 10000): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}key=${firebaseConfig.apiKey}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+      },
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || `Firestore REST error ${response.status}`);
+    }
+
+    return await response.json() as T;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function createItemRest(item: ItemPayload): Promise<string> {
+  const result = await firestoreRestRequest<{ name: string }>(
+    `${firestoreBaseUrl}/items`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ fields: itemToFirestoreFields(item, true) }),
+    }
+  );
+
+  return result.name.split('/').pop() || '';
+}
+
+async function updateItemRest(itemId: string, item: ItemPayload) {
+  const updateMasks = ['name', 'quantity', 'imageUrl', 'updatedAt']
+    .map((field) => `updateMask.fieldPaths=${field}`)
+    .join('&');
+
+  await firestoreRestRequest(
+    `${firestoreBaseUrl}/items/${itemId}?${updateMasks}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: itemToFirestoreFields(item) }),
+    }
+  );
+}
+
+async function deleteItemRest(itemId: string) {
+  await firestoreRestRequest(
+    `${firestoreBaseUrl}/items/${itemId}`,
+    { method: 'DELETE' }
+  );
 }
 
 function normalizeItem(id: string, data: any): InventoryItem {
@@ -249,29 +331,19 @@ export default function App() {
       };
 
       if (editingItem) {
-        const itemDoc = doc(db, 'items', editingItem.id);
-        await withTimeout(
-          updateDoc(itemDoc, itemData),
-          8000,
-          'Request update database terlalu lama.'
-        );
+        await updateItemRest(editingItem.id, itemData);
         toast.success('Barang berhasil diperbarui', { id: toastId });
         if (data.imageFile) {
           void uploadImageInBackground(editingItem.id, data.imageFile);
         }
       } else {
-        const docRef = await withTimeout(
-          addDoc(collection(db, 'items'), {
-            ...itemData,
-            createdAt: now,
-            createdBy: user.uid,
-          }),
-          8000,
-          'Request simpan database terlalu lama.'
-        );
+        const docId = await createItemRest({
+          ...itemData,
+          createdBy: user.uid,
+        });
         toast.success('Barang berhasil disimpan', { id: toastId });
-        if (data.imageFile) {
-          void uploadImageInBackground(docRef.id, data.imageFile);
+        if (data.imageFile && docId) {
+          void uploadImageInBackground(docId, data.imageFile);
         }
       }
 
@@ -306,11 +378,7 @@ export default function App() {
     setIsDeleting(true);
     const toastId = 'inventory-delete';
     try {
-      await withTimeout(
-        deleteDoc(doc(db, 'items', itemToDelete.id)),
-        15000,
-        'Request hapus database terlalu lama.'
-      );
+      await deleteItemRest(itemToDelete.id);
       toast.success('Data barang berhasil dihapus', { id: toastId });
       setIsDeleteModalOpen(false);
       setItemToDelete(null);

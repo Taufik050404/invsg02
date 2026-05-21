@@ -196,7 +196,7 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
   };
 
   return (
-    <AnimatePresence mode="wait">
+    <AnimatePresence>
       {isOpen && (
         <div key="modal-container" id="modal-container" className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <motion.div
