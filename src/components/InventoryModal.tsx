@@ -12,6 +12,13 @@ interface InventoryModalProps {
   editItem?: InventoryItem | null;
 }
 
+const imageCompressionOptions = {
+  maxSizeMB: 0.25,
+  maxWidthOrHeight: 900,
+  initialQuality: 0.72,
+  useWebWorker: true,
+};
+
 export default function InventoryModal({ isOpen, onClose, onSave, editItem }: InventoryModalProps) {
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -77,13 +84,7 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     setError(null);
 
     try {
-      const options = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1280,
-        useWebWorker: true,
-      };
-
-      const compressedBlob = await imageCompression(file, options);
+      const compressedBlob = await imageCompression(file, imageCompressionOptions);
       const compressedFile = new File(
         [compressedBlob],
         `upload-${Date.now()}.jpg`,
@@ -112,14 +113,8 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
     setIsLoading(true);
     setError(null);
     try {
-      const options = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1280,
-        useWebWorker: true,
-      };
-
       const rawFile = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const compressedBlob = await imageCompression(rawFile, options);
+      const compressedBlob = await imageCompression(rawFile, imageCompressionOptions);
       const compressedFile = new File(
         [compressedBlob],
         `camera-${Date.now()}.jpg`,

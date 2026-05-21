@@ -54,6 +54,15 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Gagal membaca gambar.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function normalizeItem(id: string, data: any): InventoryItem {
   return {
     id,
@@ -190,27 +199,44 @@ export default function App() {
     const toastId = 'inventory-save';
     toast.loading(editingItem ? 'Memperbarui barang...' : 'Menyimpan barang...', { id: toastId });
 
+    const uploadImageInBackground = async (itemId: string, file: File) => {
+      try {
+        const timestamp = Date.now();
+        const safeName = itemName.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 40) || 'barang';
+        const storageRef = ref(storage, `inventory/${itemId}-${timestamp}-${safeName}.jpg`);
+
+        const uploadResult = await withTimeout(
+          uploadBytes(storageRef, file, {
+            contentType: file.type || 'image/jpeg',
+            cacheControl: 'public,max-age=31536000',
+          }),
+          12000,
+          'Background upload timeout.'
+        );
+
+        const storageUrl = await withTimeout(
+          getDownloadURL(uploadResult.ref),
+          5000,
+          'Background URL timeout.'
+        );
+
+        await updateDoc(doc(db, 'items', itemId), {
+          imageUrl: storageUrl,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        console.warn('Upload Storage dilewati, gambar data URL tetap dipakai:', error);
+      }
+    };
+
     try {
       let imageUrl = data.imageUrl;
 
       if (data.imageFile) {
-        const timestamp = Date.now();
-        const safeName = itemName.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 40) || 'barang';
-        const storageRef = ref(storage, `inventory/${timestamp}-${safeName}.jpg`);
-
-        const uploadResult = await withTimeout(
-          uploadBytes(storageRef, data.imageFile, {
-            contentType: data.imageFile.type || 'image/jpeg',
-            cacheControl: 'public,max-age=31536000',
-          }),
-          20000,
-          'Upload gambar terlalu lama. Silakan coba lagi.'
-        );
-
         imageUrl = await withTimeout(
-          getDownloadURL(uploadResult.ref),
-          10000,
-          'Gagal mendapatkan URL gambar.'
+          fileToDataUrl(data.imageFile),
+          3000,
+          'Gagal menyiapkan gambar.'
         );
       }
 
@@ -226,21 +252,27 @@ export default function App() {
         const itemDoc = doc(db, 'items', editingItem.id);
         await withTimeout(
           updateDoc(itemDoc, itemData),
-          15000,
+          8000,
           'Request update database terlalu lama.'
         );
         toast.success('Barang berhasil diperbarui', { id: toastId });
+        if (data.imageFile) {
+          void uploadImageInBackground(editingItem.id, data.imageFile);
+        }
       } else {
-        await withTimeout(
+        const docRef = await withTimeout(
           addDoc(collection(db, 'items'), {
             ...itemData,
             createdAt: now,
             createdBy: user.uid,
           }),
-          15000,
+          8000,
           'Request simpan database terlalu lama.'
         );
         toast.success('Barang berhasil disimpan', { id: toastId });
+        if (data.imageFile) {
+          void uploadImageInBackground(docRef.id, data.imageFile);
+        }
       }
 
       setCurrentPage(1);
