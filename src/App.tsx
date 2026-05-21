@@ -233,6 +233,24 @@ export default function App() {
   const itemsPerPage = 6;
 
   useEffect(() => {
+    if (isModalOpen || isDeleteModalOpen) return;
+
+    const unlockPage = () => {
+      document.body.style.pointerEvents = '';
+      document.body.style.overflow = '';
+
+      document.querySelectorAll<HTMLElement>('[data-app-backdrop="true"]').forEach((element) => {
+        element.style.pointerEvents = 'none';
+        element.style.display = 'none';
+      });
+    };
+
+    unlockPage();
+    const timeoutId = window.setTimeout(unlockPage, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [isModalOpen, isDeleteModalOpen, isSidebarOpen]);
+
+  useEffect(() => {
     const isAuthenticated = localStorage.getItem(AUTH_KEY) === 'true';
     if (isAuthenticated) {
       setUser({ uid: 'admin_session' });
@@ -518,7 +536,7 @@ export default function App() {
           <Navbar onMenuClick={() => setIsSidebarOpen(true)} />
           
           <div className="p-4 md:p-8 lg:p-10 flex-1">
-            <div className="max-w-6xl mx-auto space-y-8 md:space-y-10">
+            <div className="max-w-6xl mx-auto space-y-8 md:space-y-10 relative z-10">
               {/* Header Area */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
@@ -559,7 +577,7 @@ export default function App() {
                   
                   <button
                     onClick={() => { setEditingItem(null); setIsModalOpen(true); }}
-                    className="bg-black text-white h-[52px] px-8 rounded-2xl flex items-center justify-center gap-2 font-bold hover:bg-gray-800 transition-all shadow-xl shadow-black/10 active:scale-95"
+                    className="relative z-20 bg-black text-white h-[52px] px-8 rounded-2xl flex items-center justify-center gap-2 font-bold hover:bg-gray-800 transition-all shadow-xl shadow-black/10 active:scale-95"
                   >
                     <Plus className="w-5 h-5" />
                     <span>Tambah Barang</span>
@@ -655,13 +673,13 @@ export default function App() {
                               <div className="flex items-center justify-end gap-1 md:gap-2">
                                 <button
                                   onClick={() => { setEditingItem(item); setIsModalOpen(true); }}
-                                  className="p-3 text-gray-400 hover:text-black hover:bg-white rounded-xl transition-all shadow-none hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] active:scale-90"
+                                  className="relative z-20 p-3 text-gray-400 hover:text-black hover:bg-white rounded-xl transition-all shadow-none hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] active:scale-90"
                                 >
                                   <Edit2 className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => deleteItem(item)}
-                                  className="p-3 text-gray-400 hover:text-red-500 hover:bg-white rounded-xl transition-all shadow-none hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] active:scale-90"
+                                  className="relative z-20 p-3 text-gray-400 hover:text-red-500 hover:bg-white rounded-xl transition-all shadow-none hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] active:scale-90"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>

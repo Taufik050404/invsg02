@@ -204,6 +204,7 @@ export default function InventoryModal({ isOpen, onClose, onSave, editItem }: In
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={handleClose}
+            data-app-backdrop="true"
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           />
 
