@@ -14,6 +14,10 @@ export const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
+console.info(
+  `[INVSG02] Firebase aktif: project=${firebaseConfig.projectId}, database=${firebaseConfig.firestoreDatabaseId}`
+);
+
 export const db = initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId);

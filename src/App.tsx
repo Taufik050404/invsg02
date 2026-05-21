@@ -191,7 +191,7 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   
   // Storage key for session
-  const AUTH_KEY = 'invsg02_authenticated';
+  const AUTH_KEY = 'inventory_admin_authenticated';
 
   // Delete Modal state
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
