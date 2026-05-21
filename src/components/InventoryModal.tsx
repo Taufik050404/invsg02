@@ -13,9 +13,9 @@ interface InventoryModalProps {
 }
 
 const imageCompressionOptions = {
-  maxSizeMB: 0.25,
-  maxWidthOrHeight: 900,
-  initialQuality: 0.72,
+  maxSizeMB: 0.12,
+  maxWidthOrHeight: 640,
+  initialQuality: 0.6,
   useWebWorker: true,
 };
 
